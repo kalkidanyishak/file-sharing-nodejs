@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Sharing with Progress Bar</title>
+    <style>
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            margin-bottom: 10px;
+        }
+
+        #progressContainer {
+            margin: 20px 0;
+            width: 100%;
+            background-color: #f3f3f3;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        #progressBar {
+            height: 20px;
+            width: 0%;
+            background-color: #4caf50;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="qr"></div>
+
+    <script src="qrcode.js"></script>
+    <script src="customAlert.js"></script>
+
+    <p id="ip">Loading...</p>
+    <h1>Upload Files</h1>
+
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" name="file" multiple />
+        <button type="submit">Upload</button>
+    </form>
+
+    <div id="progressContainer">
+        <div id="progressBar">0%</div>
+    </div>
+
+    <h2>Download Files</h2>
+    <button id="deleteAllButton">Delete All Files</button>
+    <ul id="fileList"></ul>
+
+    <script>
+
+
+        function deleteAllFiles() {
+            fetch(`${window.location.href}files`, {
+                method: 'DELETE',
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error('Error deleting all files');
+                    }
+                    return response.text();
+                })
+                .then((message) => {
+                    console.log(message); // "All files deleted successfully"
+                    fetchFiles(); // Refresh the file list
+                })
+                .catch((error) => {
+                    console.error("An error occurred:", error);
+                });
+        }
+
+        // Add event listener to the "Delete All" button
+        document.getElementById("deleteAllButton").addEventListener("click", deleteAllFiles);
+
+        function deleteFileByHash(fileHash) {
+            fetch(`${window.location.href}files/${fileHash}`, {
+                method: 'DELETE',
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error(`Error deleting file: ${response.statusText}`);
+                    }
+                    return response.text();
+                })
+                .then((message) => {
+                    console.log(message); // Success message, e.g., "File deleted successfully."
+                })
+                .catch((error) => {
+                    console.error("An error occurred:", error);
+                });
+        }
+
+        const userName =
+            localStorage.getItem("userName") || prompt("Enter your name:");
+        if (userName) localStorage.setItem("userName", userName);
+
+        const uploadForm = document.getElementById("uploadForm");
+        const progressBar = document.getElementById("progressBar");
+        const fileList = document.getElementById("fileList");
+
+        uploadForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(uploadForm);
+            const xhr = new XMLHttpRequest();
+
+            xhr.open("POST", "/upload", true);
+            xhr.setRequestHeader("X-User-Name", userName);
+
+            // Update progress bar during the upload
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = Math.round(
+                        (event.loaded / event.total) * 100
+                    );
+                    progressBar.style.width = percentComplete + "%";
+                    progressBar.textContent = percentComplete + "%";
+                }
+            };
+
+            // Handle success and errors
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    alert("File uploaded successfully.");
+                } else {
+                    let html = JSON.parse(xhr.responseText).map((file) => `<a href='/files/${file}'>${file.split("-").slice(2).join("-")}</a>`).join("<br>");
+
+                    customAlert(`File already exists: ${html}`);
+                }
+                progressBar.style.width = "0%";
+                progressBar.textContent = "0%";
+                fetchFiles();
+            };
+
+            xhr.onerror = () => {
+                alert("An error occurred while uploading the file.");
+                progressBar.style.width = "0%";
+                progressBar.textContent = "0%";
+            };
+
+            xhr.send(formData);
+        });
+
+        async function fetchFiles() {
+            try {
+                const response = await fetch("/files");
+                if (response.ok) {
+                    const files = await response.json();
+                    fileList.innerHTML = ""; // Clear previous list
+                    files.forEach((file) => {
+                        const listItem = document.createElement("li");
+                        const link = document.createElement("a");
+                        link.href = `/files/${file.filename}`;
+                        link.textContent = file.originalName;
+
+                        // Display file size and last modified date
+                        const fileInfo = document.createElement("span");
+                        fileInfo.textContent = ` - ${file.size} MB | ${file.lastModified} | ${file.uploaderName}`;
+                        listItem.appendChild(link);
+                        listItem.appendChild(fileInfo);
+
+                        // Create delete button
+                        const deleteButton = document.createElement("button");
+                        deleteButton.textContent = "Delete";
+                        deleteButton.onclick = () => deleteFileByHash(file.filename.split("-")[0]); // Assuming the hash is the first part of the filename
+                        listItem.appendChild(deleteButton);
+
+                        fileList.appendChild(listItem);
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching files", error);
+            }
+        }
+
+        fetchFiles(); // Load the files when the page is loaded
+
+        fetch(`${window.location.href}get-ip`)
+            .then((response) => response.json())
+            .then((data) => {
+                // Display the IP in the paragraph with id="ip"
+                const QRElement = document.getElementById("qr");
+
+                new QRCode(QRElement, {
+                    text: `http://${data.ip}:5000`,
+                    width: 150,
+                    height: 150,
+                });
+
+                document.getElementById("ip").textContent = `http://${data.ip}:5000`;
+            })
+            .catch((error) => {
+                console.error("Error fetching IP:", error);
+                document.getElementById("ip").textContent = "Error fetching IP.";
+            });
+
+        const eventSource = new EventSource(`${window.location.href}events`);
+
+        // Listen for incoming events
+        eventSource.onmessage = (event) => {
+            fetchFiles();
+        };
+
+        eventSource.onerror = () => {
+            console.error('SSE connection error');
+        };
+
+    </script>
+</body>
+
+</html>
