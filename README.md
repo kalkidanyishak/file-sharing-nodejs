@@ -4,5 +4,6 @@
 - [ ] express file sharing folder structure
 	- [ ] now include path in the name of the files and based on the path the frontend can structure the folder
 ## future works
+- [ ] sessions
 - [ ] no need to upload from the host since the file is there in the system
 - [ ] use streams
