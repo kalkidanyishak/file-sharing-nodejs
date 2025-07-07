@@ -4,218 +4,312 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>File Sharing with Progress Bar</title>
+    <title>File & Folder Sharing with Shoelace</title>
+
+    <!-- Shoelace.style CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css" />
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace.js"></script>
+
+    <!-- You will still need your qrcode.js library -->
+    <script src="qrcode.js"></script>
+
     <style>
-        ul {
-            list-style-type: none;
-            padding: 0;
+        body {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 15px;
+            font-family: sans-serif;
         }
 
-        li {
-            margin-bottom: 10px;
+        .upload-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        #fileList {
+            display: grid;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .file-card-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .file-info {
+            color: var(--sl-color-neutral-600);
+            font-size: 0.9em;
+            margin-left: 0.5rem;
         }
 
         #progressContainer {
+            display: none; /* Hidden by default */
             margin: 20px 0;
-            width: 100%;
-            background-color: #f3f3f3;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            overflow: hidden;
         }
-
-        #progressBar {
-            height: 20px;
-            width: 0%;
-            background-color: #4caf50;
-            text-align: center;
-            color: white;
-            line-height: 20px;
+        
+        #qr {
+            margin-bottom: 1rem;
         }
     </style>
 </head>
 
 <body>
+    <!-- Container for Shoelace alerts -->
+    <div class="alert-container"></div>
+    
     <div id="qr"></div>
-
-    <script src="qrcode.js"></script>
-    <script src="customAlert.js"></script>
-
     <p id="ip">Loading...</p>
-    <h1>Upload Files</h1>
 
-    <form id="uploadForm" enctype="multipart/form-data">
-        <input type="file" name="file" multiple />
-        <button type="submit">Upload</button>
-    </form>
+    <h1>Upload Files or Folders</h1>
 
+    <!-- Hidden inputs for file and folder selection -->
+    <input type="file" id="fileInput" class="hidden-input" multiple style="display: none;" />
+    <input type="file" id="folderInput" class="hidden-input" webkitdirectory multiple style="display: none;" />
+
+    <!-- User-facing Shoelace buttons -->
+    <div class="upload-buttons">
+        <sl-button id="uploadFilesBtn" variant="primary">Upload Files</sl-button>
+        <sl-button id="uploadFolderBtn" variant="primary">Upload Folder</sl-button>
+    </div>
+
+    <!-- Shoelace progress bar -->
     <div id="progressContainer">
-        <div id="progressBar">0%</div>
+        <sl-progress-bar id="progressBar" value="0">0%</sl-progress-bar>
     </div>
 
     <h2>Download Files</h2>
-    <button id="deleteAllButton">Delete All Files</button>
-    <ul id="fileList"></ul>
+    <sl-button id="deleteAllButton" variant="danger">Delete All Files</sl-button>
+
+    <!-- Container for file cards -->
+    <div id="fileList"></div>
+
+
+    <!-- DIALOGS -->
+
+    <!-- Username Dialog -->
+    <sl-dialog id="userDialog" label="Welcome!" no-header>
+        Please enter your name to identify your uploads.
+        <sl-input id="userNameInput" placeholder="Your name" class="sl-mt-m"></sl-input>
+        <sl-button slot="footer" variant="primary" id="saveUserNameBtn">Save</sl-button>
+    </sl-dialog>
+
+    <!-- File Exists Dialog -->
+    <sl-dialog id="existsDialog" label="File(s) Already Exist">
+        <div id="existsDialogBody"></div>
+        <sl-button slot="footer" variant="primary">Close</sl-button>
+    </sl-dialog>
+
 
     <script>
-
-
-        function deleteAllFiles() {
-            fetch(`${window.location.href}files`, {
-                method: 'DELETE',
-            })
-                .then((response) => {
-                    if (!response.ok) {
-                        throw new Error('Error deleting all files');
-                    }
-                    return response.text();
-                })
-                .then((message) => {
-                    console.log(message); // "All files deleted successfully"
-                    fetchFiles(); // Refresh the file list
-                })
-                .catch((error) => {
-                    console.error("An error occurred:", error);
-                });
-        }
-
-        // Add event listener to the "Delete All" button
-        document.getElementById("deleteAllButton").addEventListener("click", deleteAllFiles);
-
-        function deleteFileByHash(fileHash) {
-            fetch(`${window.location.href}files/${fileHash}`, {
-                method: 'DELETE',
-            })
-                .then((response) => {
-                    if (!response.ok) {
-                        throw new Error(`Error deleting file: ${response.statusText}`);
-                    }
-                    return response.text();
-                })
-                .then((message) => {
-                    console.log(message); // Success message, e.g., "File deleted successfully."
-                })
-                .catch((error) => {
-                    console.error("An error occurred:", error);
-                });
-        }
-
-        const userName =
-            localStorage.getItem("userName") || prompt("Enter your name:");
-        if (userName) localStorage.setItem("userName", userName);
-
-        const uploadForm = document.getElementById("uploadForm");
+        // --- DOM ELEMENT SELECTORS ---
+        const fileInput = document.getElementById('fileInput');
+        const folderInput = document.getElementById('folderInput');
+        const uploadFilesBtn = document.getElementById('uploadFilesBtn');
+        const uploadFolderBtn = document.getElementById('uploadFolderBtn');
+        const deleteAllButton = document.getElementById('deleteAllButton');
+        const progressContainer = document.getElementById('progressContainer');
         const progressBar = document.getElementById("progressBar");
         const fileList = document.getElementById("fileList");
 
-        uploadForm.addEventListener("submit", (e) => {
-            e.preventDefault();
+        // Dialogs
+        const userDialog = document.getElementById('userDialog');
+        const userNameInput = document.getElementById('userNameInput');
+        const saveUserNameBtn = document.getElementById('saveUserNameBtn');
+        const existsDialog = document.getElementById('existsDialog');
+        const existsDialogBody = document.getElementById('existsDialogBody');
 
-            const formData = new FormData(uploadForm);
+        // --- HELPER FUNCTIONS ---
+        function showNotification(message, variant = 'primary', icon = 'info-circle', duration = 4000) {
+            const alert = Object.assign(document.createElement('sl-alert'), {
+                variant,
+                closable: true,
+                duration: duration,
+                innerHTML: `
+                    <sl-icon name="${icon}" slot="icon"></sl-icon>
+                    ${message}
+                `
+            });
+            document.querySelector('.alert-container').appendChild(alert);
+            // This is a new utility in Shoelace 2.15, for older versions you'd show it manually
+            return alert.toast();
+        }
+
+        function deleteAllFiles() {
+            fetch(`${window.location.href}files`, { method: 'DELETE' })
+                .then(response => {
+                    if (!response.ok) throw new Error('Error deleting all files');
+                    return response.text();
+                })
+                .then(message => {
+                    showNotification(message, 'success', 'check2-circle');
+                    fetchFiles();
+                })
+                .catch(error => showNotification(error.message, 'danger', 'exclamation-octagon'));
+        }
+
+        function deleteFileByHash(fileHash) {
+            fetch(`${window.location.href}files/${fileHash}`, { method: 'DELETE' })
+                .then(response => {
+                    if (!response.ok) throw new Error(`Error deleting file: ${response.statusText}`);
+                    return response.text();
+                })
+                .then(message => showNotification(message, 'success', 'check2-circle'))
+                .catch(error => showNotification(error.message, 'danger', 'exclamation-octagon'));
+        }
+
+        // --- USERNAME HANDLING ---
+        let userName = localStorage.getItem("userName");
+        if (!userName) {
+            userDialog.show();
+        }
+
+        saveUserNameBtn.addEventListener('click', () => {
+            const name = userNameInput.value.trim();
+            if (name) {
+                userName = name;
+                localStorage.setItem("userName", userName);
+                userDialog.hide();
+            } else {
+                userNameInput.setCustomValidity("Please enter your name.");
+                userNameInput.reportValidity();
+            }
+        });
+        userNameInput.addEventListener('sl-input', () => userNameInput.setCustomValidity(''));
+
+
+        // --- UPLOAD LOGIC ---
+        uploadFilesBtn.addEventListener('click', () => fileInput.click());
+        uploadFolderBtn.addEventListener('click', () => folderInput.click());
+        fileInput.addEventListener('change', handleUpload);
+        folderInput.addEventListener('change', handleUpload);
+
+        function handleUpload(event) {
+            const files = event.target.files;
+            if (!files.length) return;
+
+            const formData = new FormData();
+            for (const file of files) {
+                // Flatten folder structure by replacing slashes
+                const relativePath = file.webkitRelativePath.replaceAll('/', '_') || file.name;
+                const renamedFile = new File([file], relativePath, {
+                    type: file.type,
+                    lastModified: file.lastModified,
+                });
+                formData.append('file', renamedFile);
+            }
+
             const xhr = new XMLHttpRequest();
-
             xhr.open("POST", "/upload", true);
-            xhr.setRequestHeader("X-User-Name", userName);
+            xhr.setRequestHeader("X-User-Name", userName || "Anonymous");
 
-            // Update progress bar during the upload
-            xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable) {
-                    const percentComplete = Math.round(
-                        (event.loaded / event.total) * 100
-                    );
-                    progressBar.style.width = percentComplete + "%";
+            progressContainer.style.display = 'block';
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    progressBar.value = percentComplete;
                     progressBar.textContent = percentComplete + "%";
                 }
             };
 
-            // Handle success and errors
             xhr.onload = () => {
                 if (xhr.status === 200) {
-                    alert("File uploaded successfully.");
+                    showNotification('Upload successful.', 'success', 'check2-circle');
                 } else {
-                    let html = JSON.parse(xhr.responseText).map((file) => `<a href='/files/${file}'>${file.split("-").slice(2).join("-")}</a>`).join("<br>");
-
-                    customAlert(`File already exists: ${html}`);
+                    const existingFiles = JSON.parse(xhr.responseText);
+                    const html = existingFiles.map(file =>
+                        `<div><a href='/files/${file}' target='_blank'>${file.split("-").slice(2).join("-")}</a></div>`
+                    ).join("");
+                    existsDialogBody.innerHTML = html;
+                    existsDialog.show();
                 }
-                progressBar.style.width = "0%";
-                progressBar.textContent = "0%";
+                resetProgressBar();
                 fetchFiles();
             };
 
             xhr.onerror = () => {
-                alert("An error occurred while uploading the file.");
-                progressBar.style.width = "0%";
-                progressBar.textContent = "0%";
+                showNotification('An error occurred during upload.', 'danger', 'exclamation-octagon');
+                resetProgressBar();
             };
 
             xhr.send(formData);
-        });
+            event.target.value = ''; // Reset to allow re-uploading same files/folder
+        }
 
+        function resetProgressBar() {
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                progressBar.value = 0;
+                progressBar.textContent = "0%";
+            }, 1500);
+        }
+
+
+        // --- FILE LIST & PAGE LOAD ---
         async function fetchFiles() {
             try {
                 const response = await fetch("/files");
-                if (response.ok) {
-                    const files = await response.json();
-                    fileList.innerHTML = ""; // Clear previous list
-                    files.forEach((file) => {
-                        const listItem = document.createElement("li");
-                        const link = document.createElement("a");
-                        link.href = `/files/${file.filename}`;
-                        link.textContent = file.originalName;
+                if (!response.ok) throw new Error('Failed to fetch file list.');
+                const files = await response.json();
 
-                        // Display file size and last modified date
-                        const fileInfo = document.createElement("span");
-                        fileInfo.textContent = ` - ${file.size} MB | ${file.lastModified} | ${file.uploaderName}`;
-                        listItem.appendChild(link);
-                        listItem.appendChild(fileInfo);
+                fileList.innerHTML = ""; // Clear previous list
+                files.forEach((file) => {
+                    const card = document.createElement('sl-card');
+                    
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'file-card-content';
 
-                        // Create delete button
-                        const deleteButton = document.createElement("button");
-                        deleteButton.textContent = "Delete";
-                        deleteButton.onclick = () => deleteFileByHash(file.filename.split("-")[0]); // Assuming the hash is the first part of the filename
-                        listItem.appendChild(deleteButton);
+                    const linkContainer = document.createElement('div');
+                    linkContainer.innerHTML = `
+                        <a href="/files/${file.filename}" target="_blank">${file.originalName}</a>
+                        <span class="file-info">(${file.size} MB | ${file.lastModified} | by ${file.uploaderName})</span>
+                    `;
 
-                        fileList.appendChild(listItem);
-                    });
-                }
+                    const deleteButton = document.createElement('sl-button');
+                    deleteButton.variant = 'danger';
+                    deleteButton.size = 'small';
+                    deleteButton.innerHTML = `<sl-icon name="trash"></sl-icon> Delete`;
+                    deleteButton.onclick = () => deleteFileByHash(file.filename.split("-")[0]);
+
+                    contentDiv.appendChild(linkContainer);
+                    contentDiv.appendChild(deleteButton);
+                    card.appendChild(contentDiv);
+                    fileList.appendChild(card);
+                });
             } catch (error) {
                 console.error("Error fetching files", error);
+                showNotification(error.message, 'danger', 'exclamation-octagon');
             }
         }
 
-        fetchFiles(); // Load the files when the page is loaded
+        deleteAllButton.addEventListener("click", deleteAllFiles);
+        fetchFiles(); // Initial file load
 
+        // Fetch IP for QR code
         fetch(`${window.location.href}get-ip`)
-            .then((response) => response.json())
-            .then((data) => {
-                // Display the IP in the paragraph with id="ip"
-                const QRElement = document.getElementById("qr");
-
-                new QRCode(QRElement, {
+            .then(response => response.json())
+            .then(data => {
+                new QRCode(document.getElementById("qr"), {
                     text: `http://${data.ip}:5000`,
                     width: 150,
                     height: 150,
                 });
-
                 document.getElementById("ip").textContent = `http://${data.ip}:5000`;
             })
-            .catch((error) => {
+            .catch(error => {
                 console.error("Error fetching IP:", error);
                 document.getElementById("ip").textContent = "Error fetching IP.";
             });
 
+        // Server-Sent Events for real-time updates
         const eventSource = new EventSource(`${window.location.href}events`);
-
-        // Listen for incoming events
-        eventSource.onmessage = (event) => {
-            fetchFiles();
-        };
-
-        eventSource.onerror = () => {
-            console.error('SSE connection error');
-        };
+        eventSource.onmessage = () => fetchFiles();
+        eventSource.onerror = () => console.error('SSE connection error');
 
     </script>
 </body>
-
 </html>
